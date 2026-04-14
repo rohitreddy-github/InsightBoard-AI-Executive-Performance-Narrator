@@ -4,6 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.config import get_settings
 from app.models.schemas import MissingValueStrategy, ReportResponse, TimeAggregation
+from app.prompts.system_prompts import PersonaRole
 from app.services.ingestion import InputContractError
 from app.services.pipeline import build_report_pipeline
 
@@ -30,6 +31,10 @@ async def generate_report(
         UploadFile | None,
         File(description="Optional chart image for multimodal explanation"),
     ] = None,
+    persona: Annotated[
+        PersonaRole,
+        Form(description="Executive persona used for prompt framing."),
+    ] = PersonaRole.CFO,
 ) -> ReportResponse:
     if not csv_file.filename or not csv_file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV uploads are supported.")
@@ -39,6 +44,7 @@ async def generate_report(
         raise HTTPException(status_code=400, detail="CSV upload is empty.")
 
     chart_bytes = await chart_image.read() if chart_image is not None else None
+    chart_mime_type = chart_image.content_type if chart_image is not None else None
     pipeline = build_report_pipeline()
 
     try:
@@ -49,6 +55,8 @@ async def generate_report(
             aggregation_granularity=aggregation_granularity,
             missing_value_strategy=missing_value_strategy,
             chart_image_bytes=chart_bytes,
+            chart_image_mime_type=chart_mime_type,
+            persona=persona,
         )
     except InputContractError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

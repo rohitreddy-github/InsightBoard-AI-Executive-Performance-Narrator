@@ -17,6 +17,7 @@ class NarrativeGenerator:
         chart_explanation: ChartExplanation,
         persona: PersonaRole | None = None,
         chart_base64: str | None = None,
+        chart_mime_type: str = "image/png",
         records_analyzed: int | None = None,
         periods_analyzed: int | None = None,
         date_range_start: str = "Unknown",
@@ -32,6 +33,7 @@ class NarrativeGenerator:
             chart_explanation: Chart explanation metadata
             persona: Optional persona for prompt personalization (defaults to CFO)
             chart_base64: Optional base64-encoded chart image
+            chart_mime_type: MIME type for the chart image payload
             records_analyzed: Count of source rows analyzed
             periods_analyzed: Count of time buckets analyzed
             date_range_start: Start date of analyzed period
@@ -91,6 +93,7 @@ class NarrativeGenerator:
             periods_analyzed=resolved_periods,
             chart_base64=chart_base64,
             chart_explanation=chart_explanation,
+            chart_mime_type=chart_mime_type,
             date_range_start=date_range_start,
             date_range_end=date_range_end,
         )

@@ -156,6 +156,7 @@ No KPI values exceeded the configured anomaly threshold in this reporting period
     def format_chart_context(
         chart_base64: str | None = None,
         chart_explanation: ChartExplanation | None = None,
+        chart_mime_type: str = "image/png",
     ) -> str:
         """Format chart explanation and image payload context."""
         if chart_base64:
@@ -170,7 +171,7 @@ No KPI values exceeded the configured anomaly threshold in this reporting period
                 else "multimodal-placeholder"
             )
 
-            return f"""<chart_context source="{chart_source}" has_image="true" mime_type="image/png" encoding="base64">
+            return f"""<chart_context source="{chart_source}" has_image="true" mime_type="{chart_mime_type}" encoding="base64">
 <summary>{chart_summary}</summary>
 <usage_instruction>{ContextFormatter.CHART_CONTEXT_INSTRUCTION}</usage_instruction>
 <image_bytes_estimate>{len(chart_base64) // 4 * 3}</image_bytes_estimate>
@@ -225,6 +226,7 @@ No KPI values exceeded the configured anomaly threshold in this reporting period
         periods_analyzed: int,
         chart_base64: str | None = None,
         chart_explanation: ChartExplanation | None = None,
+        chart_mime_type: str = "image/png",
         date_range_start: str = "Unknown",
         date_range_end: str = "Unknown",
     ) -> str:
@@ -243,6 +245,7 @@ No KPI values exceeded the configured anomaly threshold in this reporting period
             ContextFormatter.format_chart_context(
                 chart_base64=chart_base64,
                 chart_explanation=chart_explanation,
+                chart_mime_type=chart_mime_type,
             ),
             "</kpi_analysis_context>",
         ]
@@ -292,6 +295,7 @@ def build_complete_user_prompt(
     periods_analyzed: int,
     chart_base64: str | None = None,
     chart_explanation: ChartExplanation | None = None,
+    chart_mime_type: str = "image/png",
     date_range_start: str = "Unknown",
     date_range_end: str = "Unknown",
 ) -> str:
@@ -304,6 +308,7 @@ def build_complete_user_prompt(
         periods_analyzed=periods_analyzed,
         chart_base64=chart_base64,
         chart_explanation=chart_explanation,
+        chart_mime_type=chart_mime_type,
         date_range_start=date_range_start,
         date_range_end=date_range_end,
     )

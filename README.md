@@ -8,6 +8,7 @@ The project is now through:
 
 - **Phase 1: System Architecture & Data Modeling**
 - **Phase 2: Data Ingestion & Preprocessing (Pandas)**
+- **Phase 6: Multimodal LLM Integration**
 
 The repository now enforces a canonical long-format CSV contract and preprocesses real-world KPI time series before analytics and narrative generation.
 
@@ -35,6 +36,7 @@ This first version gives you a strong backend scaffold rather than a finished AI
 - heuristic anomaly detection,
 - trend-based narrative generation,
 - chart explanation placeholder for future multimodal model support,
+- optional OpenAI Responses API and Gemini SDK adapters for multimodal narration,
 - test fixtures and baseline pytest coverage,
 - Docker-ready packaging.
 
@@ -64,7 +66,7 @@ python -m venv .venv
 ### 2. Install dependencies
 
 ```powershell
-pip install -e .[dev]
+pip install -e .[dev,llm]
 ```
 
 ### 3. Run the API
@@ -102,6 +104,7 @@ Multipart form fields:
 - `aggregation_granularity`: `weekly` or `monthly`
 - `missing_value_strategy`: `drop`, `forward_fill`, or `interpolate`
 - `chart_image`: optional image upload for multimodal chart explanation workflows
+- `persona`: optional executive framing (`cfo`, `coo`, `cro`, `analyst`, `operations`)
 
 Expected CSV header:
 
@@ -155,6 +158,29 @@ date,metric_name,value
 3. Add multimodal chart parsing with a vision-capable API.
 4. Persist generated reports and feedback for iteration loops.
 5. Add auth, observability, background jobs, and production deployment manifests.
+
+## Multimodal providers
+
+Set one of these in `.env` to enable live model calls:
+
+```text
+INSIGHTBOARD_DEFAULT_LLM_PROVIDER=openai
+INSIGHTBOARD_OPENAI_API_KEY=...
+INSIGHTBOARD_OPENAI_MODEL=gpt-4.1-mini
+```
+
+or
+
+```text
+INSIGHTBOARD_DEFAULT_LLM_PROVIDER=gemini
+INSIGHTBOARD_GEMINI_API_KEY=...
+INSIGHTBOARD_GEMINI_MODEL=gemini-2.5-flash
+```
+
+When a chart image is available, the app now forwards it with the prompt:
+
+- OpenAI: as an `input_image` part using a `data:image/...;base64,...` URL
+- Gemini: as an image part using inline Base64-backed bytes
 
 ## Tech stack
 

@@ -90,6 +90,7 @@ class PromptContextBuilder:
         periods_analyzed: int,
         chart_base64: str | None = None,
         chart_explanation: ChartExplanation | None = None,
+        chart_mime_type: str = "image/png",
         date_range_start: str = "Unknown",
         date_range_end: str = "Unknown",
     ) -> dict[str, str]:
@@ -103,7 +104,7 @@ class PromptContextBuilder:
         )
         metrics = self.formatter.format_statistical_summary(metric_snapshots)
         anomalies_section = self.formatter.format_anomalies_section(anomalies)
-        chart = self.formatter.format_chart_context(chart_base64, chart_explanation)
+        chart = self.formatter.format_chart_context(chart_base64, chart_explanation, chart_mime_type)
 
         return {
             "metadata": metadata,
@@ -131,6 +132,7 @@ class PromptContextBuilder:
         periods_analyzed: int,
         chart_base64: str | None = None,
         chart_explanation: ChartExplanation | None = None,
+        chart_mime_type: str = "image/png",
         date_range_start: str = "Unknown",
         date_range_end: str = "Unknown",
     ) -> str:
@@ -143,6 +145,7 @@ class PromptContextBuilder:
             periods_analyzed=periods_analyzed,
             chart_base64=chart_base64,
             chart_explanation=chart_explanation,
+            chart_mime_type=chart_mime_type,
             date_range_start=date_range_start,
             date_range_end=date_range_end,
         )
@@ -165,6 +168,7 @@ class PromptAssembler:
         periods_analyzed: int,
         chart_base64: str | None = None,
         chart_explanation: ChartExplanation | None = None,
+        chart_mime_type: str = "image/png",
         date_range_start: str = "Unknown",
         date_range_end: str = "Unknown",
     ) -> AssemblyContext:
@@ -179,6 +183,7 @@ class PromptAssembler:
             periods_analyzed=periods_analyzed,
             chart_base64=chart_base64,
             chart_explanation=chart_explanation,
+            chart_mime_type=chart_mime_type,
             date_range_start=date_range_start,
             date_range_end=date_range_end,
         )
@@ -191,6 +196,7 @@ class PromptAssembler:
             periods_analyzed=periods_analyzed,
             chart_base64=chart_base64,
             chart_explanation=chart_explanation,
+            chart_mime_type=chart_mime_type,
             date_range_start=date_range_start,
             date_range_end=date_range_end,
         )
@@ -355,6 +361,7 @@ def build_prompt_for_persona(
     periods_analyzed: int,
     chart_base64: str | None = None,
     chart_explanation: ChartExplanation | None = None,
+    chart_mime_type: str = "image/png",
     date_range_start: str = "Unknown",
     date_range_end: str = "Unknown",
 ) -> AssemblyContext:
@@ -372,6 +379,7 @@ def build_prompt_for_persona(
         periods_analyzed=periods_analyzed,
         chart_base64=chart_base64,
         chart_explanation=chart_explanation,
+        chart_mime_type=chart_mime_type,
         date_range_start=date_range_start,
         date_range_end=date_range_end,
     )

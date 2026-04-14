@@ -74,12 +74,22 @@ class MetricSnapshot(BaseModel):
     trend_direction: Literal["up", "down", "flat"]
 
 
+class AnomalyDataPoint(BaseModel):
+    date: date
+    value: float
+    rolling_mean: float
+    rolling_std: float
+    zscore: float
+    deviation_percent: float
+
+
 class AnomalyInsight(BaseModel):
     metric: str
     severity: Literal["low", "medium", "high"]
     latest_value: float
     baseline_value: float
     reason: str
+    anomalous_points: list[AnomalyDataPoint] = Field(default_factory=list)
 
 
 class ChartExplanation(BaseModel):

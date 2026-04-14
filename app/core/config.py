@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     default_llm_provider: str = "mock"
     default_llm_model: str = "executive-summary-model"
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4.1-mini"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    llm_timeout_seconds: float = Field(default=60.0, gt=0)
+    llm_temperature: float = Field(default=0.2, ge=0, le=2)
+    openai_vision_detail: str = "high"
     anomaly_zscore_threshold: float = Field(default=2.0, gt=0)
     latest_change_alert_threshold: float = Field(default=0.15, gt=0)
     default_aggregation_granularity: TimeAggregation = "monthly"
