@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
+import logging
 
 import pandas as pd
 from pydantic import TypeAdapter, ValidationError
@@ -12,6 +13,8 @@ from app.models.schemas import (
     PreprocessingSummary,
     TimeAggregation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -46,12 +49,31 @@ class CSVIngestionService:
         aggregation_granularity: TimeAggregation = "monthly",
         missing_value_strategy: MissingValueStrategy = "forward_fill",
     ) -> DatasetBundle:
-        raw_frame = pd.read_csv(BytesIO(csv_bytes))
+        try:
+            raw_frame = pd.read_csv(BytesIO(csv_bytes))
+        except Exception as exc:
+            raise InputContractError(
+                f"Failed to parse CSV file. Ensure it is a valid CSV format. Details: {exc}"
+            ) from exc
+
+        if raw_frame.empty:
+            raise InputContractError("CSV file is empty. Please provide a CSV with data rows.")
+
         raw_frame.columns = [self._normalize_column_name(column) for column in raw_frame.columns]
         raw_frame = raw_frame.dropna(how="all").reset_index(drop=True)
 
-        self._validate_columns(raw_frame)
-        records = self._validate_records(raw_frame)
+        try:
+            self._validate_columns(raw_frame)
+        except InputContractError as exc:
+            logger.warning(f"CSV column validation failed: {exc}")
+            raise
+
+        try:
+            records = self._validate_records(raw_frame)
+        except InputContractError as exc:
+            logger.warning(f"CSV record validation failed: {exc}")
+            raise
+
         validated_frame = pd.DataFrame(record.model_dump() for record in records)
         validated_frame["date"] = pd.to_datetime(validated_frame["date"], errors="coerce")
         validated_frame["metric_name"] = validated_frame["metric_name"].map(self._normalize_metric_name)
@@ -59,9 +81,10 @@ class CSVIngestionService:
 
         invalid_dates = validated_frame["date"].isna()
         if invalid_dates.any():
+            invalid_row_indices = validated_frame.index[invalid_dates].tolist()
             raise InputContractError(
-                "CSV contains unparseable date values at rows "
-                f"{validated_frame.index[invalid_dates].tolist()}."
+                f"CSV contains unparseable date values at rows {invalid_row_indices}. "
+                "Ensure dates are in a standard format (e.g., YYYY-MM-DD or MM/DD/YYYY)."
             )
 
         rows_received = len(validated_frame)
@@ -74,11 +97,17 @@ class CSVIngestionService:
             - len(deduped_frame.groupby(["date", "metric_name"], dropna=False))
         )
 
-        processed_long_frame, missing_values_imputed = self._preprocess_time_series(
-            deduped_frame,
-            aggregation_granularity=aggregation_granularity,
-            missing_value_strategy=missing_value_strategy,
-        )
+        try:
+            processed_long_frame, missing_values_imputed = self._preprocess_time_series(
+                deduped_frame,
+                aggregation_granularity=aggregation_granularity,
+                missing_value_strategy=missing_value_strategy,
+            )
+        except Exception as exc:
+            raise InputContractError(
+                f"Failed to preprocess time-series data: {exc}. Check that your data is valid and complete."
+            ) from exc
+
         pivot_frame = processed_long_frame.pivot(
             index="date",
             columns="metric_name",
@@ -102,6 +131,11 @@ class CSVIngestionService:
             missing_values_detected=missing_values_detected,
             missing_values_imputed=missing_values_imputed,
             output_periods_generated=int(pivot_frame["date"].nunique()),
+        )
+
+        logger.info(
+            f"CSV ingestion successful: {rows_received} rows, {len(metric_columns)} metrics, "
+            f"duplicates removed={exact_duplicate_rows_removed}, missing imputed={missing_values_imputed}"
         )
 
         return DatasetBundle(
@@ -163,8 +197,10 @@ class CSVIngestionService:
         actual_columns = list(frame.columns)
         expected_columns = list(self.REQUIRED_COLUMNS)
         if actual_columns != expected_columns:
+            logger.error(f"Column mismatch: expected {expected_columns}, got {actual_columns}")
             raise InputContractError(
-                f"CSV columns must exactly match {expected_columns}. Received {actual_columns}."
+                f"CSV columns must exactly match {expected_columns}. Received {actual_columns}. "
+                "Make sure your CSV has headers: 'date', 'metric_name', 'value'."
             )
 
     def _validate_records(self, frame: pd.DataFrame) -> list[KPIRecordInput]:
@@ -172,7 +208,14 @@ class CSVIngestionService:
         try:
             return self.RECORD_ADAPTER.validate_python(raw_records)
         except ValidationError as exc:
-            raise InputContractError(f"CSV row validation failed: {exc}") from exc
+            logger.error(f"Record validation failed: {exc}")
+            error_count = len(exc.errors())
+            sample_errors = exc.errors()[:3]
+            raise InputContractError(
+                f"CSV row validation failed with {error_count} error(s). "
+                f"Sample errors: {sample_errors}. "
+                "Ensure all rows have date, metric_name, and value columns with appropriate data types."
+            ) from exc
 
     def _preprocess_time_series(
         self,

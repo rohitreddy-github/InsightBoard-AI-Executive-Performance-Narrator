@@ -1,12 +1,21 @@
 import base64
 import json
+import logging
 import re
 from typing import Any, Protocol
 
 from pydantic import ValidationError
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from typing_extensions import NamedTuple
 
 from app.models.schemas import LLMNarrativeResponse, NarrativeSections
+
+logger = logging.getLogger(__name__)
 
 
 JSON_RESPONSE_INSTRUCTION = """
@@ -78,7 +87,7 @@ class MockLLMClient:
 
 
 class OpenAIResponsesLLMClient:
-    """OpenAI Responses API adapter with multimodal chart support."""
+    """OpenAI Responses API adapter with multimodal chart support and retry resilience."""
 
     def __init__(
         self,
@@ -86,11 +95,13 @@ class OpenAIResponsesLLMClient:
         model: str,
         timeout_seconds: float = 60.0,
         image_detail: str = "high",
+        max_retries: int = 3,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.image_detail = image_detail
+        self.max_retries = max_retries
 
     def generate_sections(
         self,
@@ -104,7 +115,37 @@ class OpenAIResponsesLLMClient:
             return fallback
 
         try:
-            from openai import OpenAI
+            return self._generate_with_retry(
+                report_title=report_title,
+                context=context,
+                fallback=fallback,
+                prompt=prompt,
+                system_prompt=system_prompt,
+            )
+        except Exception as exc:
+            logger.error(
+                f"Failed to generate narrative sections after {self.max_retries} attempts: {exc}",
+                exc_info=True,
+            )
+            return fallback
+
+    @retry(
+        retry=retry_if_exception_type((Exception,)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def _generate_with_retry(
+        self,
+        report_title: str,
+        context: dict[str, Any],
+        fallback: NarrativeSections,
+        prompt: StructuredPrompt,
+        system_prompt: str | None = None,
+    ) -> NarrativeSections:
+        """Internal method with retry logic for OpenAI API calls."""
+        try:
+            from openai import OpenAI, RateLimitError
         except ImportError:
             return fallback
 
@@ -135,15 +176,15 @@ class OpenAIResponsesLLMClient:
                     }
                 },
             )
-        except Exception:
-            return fallback
-
-        response_text = getattr(response, "output_text", "") or extract_openai_output_text(response)
-        return parse_narrative_sections(response_text, fallback)
+            response_text = getattr(response, "output_text", "") or extract_openai_output_text(response)
+            return parse_narrative_sections(response_text, fallback)
+        except Exception as exc:
+            logger.warning(f"OpenAI API call failed: {exc}", exc_info=False)
+            raise
 
 
 class GeminiLLMClient:
-    """Gemini SDK adapter with text-plus-image chart input."""
+    """Gemini SDK adapter with text-plus-image chart input and retry resilience."""
 
     def __init__(
         self,
@@ -151,11 +192,13 @@ class GeminiLLMClient:
         model: str,
         timeout_seconds: float = 60.0,
         temperature: float = 0.2,
+        max_retries: int = 3,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.temperature = temperature
+        self.max_retries = max_retries
 
     def generate_sections(
         self,
@@ -168,6 +211,36 @@ class GeminiLLMClient:
         if not self.api_key or prompt is None:
             return fallback
 
+        try:
+            return self._generate_with_retry(
+                report_title=report_title,
+                context=context,
+                fallback=fallback,
+                prompt=prompt,
+                system_prompt=system_prompt,
+            )
+        except Exception as exc:
+            logger.error(
+                f"Failed to generate narrative sections after {self.max_retries} attempts: {exc}",
+                exc_info=True,
+            )
+            return fallback
+
+    @retry(
+        retry=retry_if_exception_type((Exception,)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def _generate_with_retry(
+        self,
+        report_title: str,
+        context: dict[str, Any],
+        fallback: NarrativeSections,
+        prompt: StructuredPrompt,
+        system_prompt: str | None = None,
+    ) -> NarrativeSections:
+        """Internal method with retry logic for Gemini API calls."""
         try:
             from google import genai
             from google.genai import types
@@ -186,6 +259,7 @@ class GeminiLLMClient:
             )
 
         try:
+            try:
                 response = client.models.generate_content(
                     model=self.model,
                     contents=contents,
@@ -197,8 +271,7 @@ class GeminiLLMClient:
                         http_options={"timeout": self.timeout_seconds},
                     ),
                 )
-        except TypeError:
-            try:
+            except TypeError:
                 response = client.models.generate_content(
                     model=self.model,
                     contents=contents,
@@ -209,13 +282,11 @@ class GeminiLLMClient:
                         response_json_schema=get_llm_narrative_json_schema(),
                     ),
                 )
-            except Exception:
-                return fallback
-        except Exception:
-            return fallback
-
-        response_text = getattr(response, "text", "") or extract_gemini_output_text(response)
-        return parse_narrative_sections(response_text, fallback)
+            response_text = getattr(response, "text", "") or extract_gemini_output_text(response)
+            return parse_narrative_sections(response_text, fallback)
+        except Exception as exc:
+            logger.warning(f"Gemini API call failed: {exc}", exc_info=False)
+            raise
 
 
 def build_multimodal_payload(
@@ -365,6 +436,7 @@ def extract_gemini_output_text(response: Any) -> str:
 def build_llm_client(settings: Any) -> LLMClient:
     """Construct the configured LLM client from application settings."""
     provider = str(getattr(settings, "default_llm_provider", "mock")).lower()
+    max_retries = getattr(settings, "llm_max_retries", 3)
 
     if provider == "openai":
         return OpenAIResponsesLLMClient(
@@ -372,6 +444,7 @@ def build_llm_client(settings: Any) -> LLMClient:
             model=getattr(settings, "openai_model", None) or getattr(settings, "default_llm_model", "gpt-4.1-mini"),
             timeout_seconds=getattr(settings, "llm_timeout_seconds", 60.0),
             image_detail=getattr(settings, "openai_vision_detail", "high"),
+            max_retries=max_retries,
         )
     if provider == "gemini":
         return GeminiLLMClient(
@@ -379,5 +452,6 @@ def build_llm_client(settings: Any) -> LLMClient:
             model=getattr(settings, "gemini_model", None) or getattr(settings, "default_llm_model", "gemini-2.5-flash"),
             timeout_seconds=getattr(settings, "llm_timeout_seconds", 60.0),
             temperature=getattr(settings, "llm_temperature", 0.2),
+            max_retries=max_retries,
         )
     return MockLLMClient()

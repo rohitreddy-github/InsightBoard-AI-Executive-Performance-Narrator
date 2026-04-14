@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_temperature: float = Field(default=0.2, ge=0, le=2)
+    llm_max_retries: int = Field(default=3, ge=1, le=10)
     openai_vision_detail: str = "high"
     anomaly_zscore_threshold: float = Field(default=2.0, gt=0)
     latest_change_alert_threshold: float = Field(default=0.15, gt=0)
