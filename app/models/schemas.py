@@ -145,4 +145,6 @@ class ReportResponse(BaseModel):
     trend_narrative: list[str]
     anomaly_commentary: list[str]
     chart_explanation: ChartExplanation
+    chart_base64: str | None = None
+    chart_mime_type: str | None = None
     recommended_actions: list[str]
