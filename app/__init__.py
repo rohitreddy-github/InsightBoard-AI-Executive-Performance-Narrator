@@ -1,0 +1,1 @@
+"""InsightBoard application package."""

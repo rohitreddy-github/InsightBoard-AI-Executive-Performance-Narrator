@@ -1,0 +1,13 @@
+date,metric_name,value
+2025-01-01,revenue,100
+2025/01/02,revenue,120
+2025-01-03,revenue,
+2025-01-04,revenue,140
+2025-01-04,revenue,140
+2025-01-05,revenue,160
+01-06-2025,revenue,180
+2025-01-01,conversion_rate,0.10
+2025-01-03,conversion_rate,0.15
+2025-01-05,conversion_rate,
+2025/01/06,conversion_rate,0.20
+2025-01-10,conversion_rate,0.18
