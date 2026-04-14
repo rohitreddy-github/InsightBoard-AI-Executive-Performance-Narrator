@@ -9,7 +9,12 @@ from app.services.ingestion import CSVIngestionService
 from app.services.llm import StructuredPrompt
 from app.services.narrative import NarrativeGenerator
 from app.services.pipeline import ReportPipeline
-from app.services.prompt_engineering import PromptAssembler, PromptChainExecutor, PromptStep
+from app.services.prompt_engineering import (
+    PromptAssembler,
+    PromptChainExecutor,
+    PromptStep,
+    PromptTemplateLibrary,
+)
 from app.services.visualization import DataVisualizationService
 
 
@@ -131,6 +136,38 @@ def test_prompt_chain_executor_replaces_initial_context_and_previous_outputs() -
 
     assert results["summarize"]["user"] == "Summarize revenue."
     assert results["recommend"]["user"] == "Use prior work: Summarize revenue."
+
+
+def test_prompt_template_library_builds_phase5_chain_from_dynamic_sections() -> None:
+    metric_snapshots, anomalies, chart_explanation = build_prompt_fixtures()
+    assembler = PromptAssembler(persona=PersonaRole.CFO)
+    assembly = assembler.assemble(
+        anomalies=anomalies,
+        metric_snapshots=metric_snapshots,
+        report_title="Board KPI Summary",
+        records_analyzed=36,
+        periods_analyzed=6,
+        chart_base64="ZmFrZS1jaGFydA==",
+        chart_explanation=chart_explanation,
+        date_range_start="2025-10-01",
+        date_range_end="2026-03-01",
+    )
+
+    chain = PromptTemplateLibrary.build_phase5_chain(
+        persona=PersonaRole.CFO,
+        context_sections=assembly.context_sections,
+    )
+
+    assert chain.persona == PersonaRole.CFO
+    assert [step.name for step in chain.steps] == [
+        "statistical_brief",
+        "anomaly_brief",
+        "chart_reconciliation",
+        "executive_narrative",
+    ]
+    assert "<report_metadata>" in chain.initial_context["metadata"]
+    assert "<chart_context" in chain.initial_context["chart"]
+    assert "<kpi_analysis_context>" in chain.initial_context["full_context"]
 
 
 def test_narrative_generator_passes_structured_prompt_to_llm() -> None:

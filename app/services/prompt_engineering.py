@@ -32,6 +32,13 @@ class PromptStep(NamedTuple):
     user_prompt_template: str  # Can contain {previous_output} placeholder
 
 
+class PromptChainBundle(NamedTuple):
+    """Reusable prompt-chaining bundle for staged KPI analysis."""
+    persona: PersonaRole
+    steps: list[PromptStep]
+    initial_context: dict[str, str]
+
+
 class SystemPromptBuilder:
     """Builds persona-specific system prompts with instructions and tone."""
 
@@ -87,17 +94,32 @@ class PromptContextBuilder:
         date_range_end: str = "Unknown",
     ) -> dict[str, str]:
         """Build individual context sections."""
+        metadata = self.formatter.format_metadata(
+            report_title=report_title,
+            records_analyzed=records_analyzed,
+            periods_analyzed=periods_analyzed,
+            date_range_start=date_range_start,
+            date_range_end=date_range_end,
+        )
+        metrics = self.formatter.format_statistical_summary(metric_snapshots)
+        anomalies_section = self.formatter.format_anomalies_section(anomalies)
+        chart = self.formatter.format_chart_context(chart_base64, chart_explanation)
+
         return {
-            "metadata": self.formatter.format_metadata(
-                report_title=report_title,
-                records_analyzed=records_analyzed,
-                periods_analyzed=periods_analyzed,
-                date_range_start=date_range_start,
-                date_range_end=date_range_end,
+            "metadata": metadata,
+            "metrics": metrics,
+            "anomalies": anomalies_section,
+            "chart": chart,
+            "full_context": "\n\n".join(
+                [
+                    "<kpi_analysis_context>",
+                    metadata,
+                    metrics,
+                    anomalies_section,
+                    chart,
+                    "</kpi_analysis_context>",
+                ]
             ),
-            "metrics": self.formatter.format_statistical_summary(metric_snapshots),
-            "anomalies": self.formatter.format_anomalies_section(anomalies),
-            "chart": self.formatter.format_chart_context(chart_base64, chart_explanation),
         }
 
     def build_user_prompt(
@@ -183,6 +205,88 @@ class PromptAssembler:
     def with_persona(self, persona: PersonaRole) -> "PromptAssembler":
         """Create a new assembler with a different persona."""
         return PromptAssembler(persona=persona)
+
+
+class PromptTemplateLibrary:
+    """Reusable prompt templates for staged KPI context assembly and chaining."""
+
+    @staticmethod
+    def build_phase5_chain(
+        persona: PersonaRole,
+        context_sections: dict[str, str],
+    ) -> PromptChainBundle:
+        """Build a default multi-step prompt chain from assembled KPI context."""
+        steps = [
+            PromptStep(
+                name="statistical_brief",
+                system_instruction=(
+                    f"{build_comprehensive_system_prompt(persona)}\n\n"
+                    "Step objective: extract only the highest-signal KPI movements from the statistical summary."
+                ),
+                user_prompt_template=(
+                    "Review the report metadata and statistical summary.\n\n"
+                    "{metadata}\n\n"
+                    "{metrics}\n\n"
+                    "Return a concise brief with:\n"
+                    "- the 3 most important KPI movements\n"
+                    "- the likely business importance of each movement\n"
+                    "- any missing context that limits certainty"
+                ),
+            ),
+            PromptStep(
+                name="anomaly_brief",
+                system_instruction=(
+                    f"{build_comprehensive_system_prompt(persona)}\n\n"
+                    "Step objective: interpret only mathematically proved anomalies."
+                ),
+                user_prompt_template=(
+                    "Use the prior KPI brief plus the anomaly evidence below.\n\n"
+                    "Prior brief:\n{previous_statistical_brief}\n\n"
+                    "{anomalies}\n\n"
+                    "Explain:\n"
+                    "- which anomalies matter most to leadership\n"
+                    "- the exact dates, values, baselines, and z-scores involved\n"
+                    "- what should be monitored next"
+                ),
+            ),
+            PromptStep(
+                name="chart_reconciliation",
+                system_instruction=(
+                    f"{build_comprehensive_system_prompt(persona)}\n\n"
+                    "Step objective: reconcile the chart context with the structured evidence without overriding it."
+                ),
+                user_prompt_template=(
+                    "Reconcile the earlier findings with the chart payload.\n\n"
+                    "Prior KPI brief:\n{previous_statistical_brief}\n\n"
+                    "Prior anomaly brief:\n{previous_anomaly_brief}\n\n"
+                    "{chart}\n\n"
+                    "State whether the chart confirms, nuances, or fails to add evidence to the structured analysis."
+                ),
+            ),
+            PromptStep(
+                name="executive_narrative",
+                system_instruction=build_comprehensive_system_prompt(persona),
+                user_prompt_template=(
+                    "Synthesize a final executive response using all prior work.\n\n"
+                    "Statistical brief:\n{previous_statistical_brief}\n\n"
+                    "Anomaly brief:\n{previous_anomaly_brief}\n\n"
+                    "Chart reconciliation:\n{previous_chart_reconciliation}\n\n"
+                    "Full payload:\n{full_context}\n\n"
+                    "Return exactly these sections:\n"
+                    "1. Executive Summary\n"
+                    "2. Trend Analysis\n"
+                    "3. Anomaly Commentary\n"
+                    "4. Recommended Actions\n"
+                    "5. Data Caveats"
+                ),
+            ),
+        ]
+
+        return PromptChainBundle(
+            persona=persona,
+            steps=steps,
+            initial_context=context_sections,
+        )
 
 
 class PromptChainExecutor:
