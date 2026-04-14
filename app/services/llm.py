@@ -3,18 +3,19 @@ import json
 import re
 from typing import Any, Protocol
 
+from pydantic import ValidationError
 from typing_extensions import NamedTuple
 
-from app.models.schemas import NarrativeSections
+from app.models.schemas import LLMNarrativeResponse, NarrativeSections
 
 
 JSON_RESPONSE_INSTRUCTION = """
 Return only valid JSON with this exact shape:
 {
-  "summary": "string",
-  "trend_narrative": ["string"],
-  "anomaly_commentary": ["string"],
-  "recommended_actions": ["string"]
+  "executive_summary": "string",
+  "trend_analysis": ["string"],
+  "anomaly_explanation": ["string"],
+  "action_items": ["string"]
 }
 
 Do not wrap the JSON in markdown fences.
@@ -125,6 +126,14 @@ class OpenAIResponsesLLMClient:
                 model=self.model,
                 instructions=payload.system_prompt,
                 input=[{"role": "user", "content": user_content}],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "executive_narrative",
+                        "strict": True,
+                        "schema": get_llm_narrative_json_schema(),
+                    }
+                },
             )
         except Exception:
             return fallback
@@ -177,15 +186,17 @@ class GeminiLLMClient:
             )
 
         try:
-            response = client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=payload.system_prompt,
-                    temperature=self.temperature,
-                    http_options={"timeout": self.timeout_seconds},
-                ),
-            )
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=payload.system_prompt,
+                        temperature=self.temperature,
+                        response_mime_type="application/json",
+                        response_json_schema=get_llm_narrative_json_schema(),
+                        http_options={"timeout": self.timeout_seconds},
+                    ),
+                )
         except TypeError:
             try:
                 response = client.models.generate_content(
@@ -194,6 +205,8 @@ class GeminiLLMClient:
                     config=types.GenerateContentConfig(
                         system_instruction=payload.system_prompt,
                         temperature=self.temperature,
+                        response_mime_type="application/json",
+                        response_json_schema=get_llm_narrative_json_schema(),
                     ),
                 )
             except Exception:
@@ -264,6 +277,11 @@ def build_json_output_prompt(user_prompt: str) -> str:
     return f"{user_prompt}\n\n{JSON_RESPONSE_INSTRUCTION}"
 
 
+def get_llm_narrative_json_schema() -> dict[str, Any]:
+    """Provider-safe JSON schema for narrative synthesis output."""
+    return LLMNarrativeResponse.model_json_schema()
+
+
 def extract_chart_payload(context: dict[str, Any]) -> tuple[str | None, str | None]:
     """Extract chart mime type and Base64 data from prompt context XML."""
     prompt_context = context.get("prompt_context", {})
@@ -292,32 +310,9 @@ def parse_narrative_sections(response_text: str, fallback: NarrativeSections) ->
         return fallback
 
     try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
+        return LLMNarrativeResponse.model_validate_json(cleaned).to_narrative_sections()
+    except ValidationError:
         return fallback
-
-    if not isinstance(parsed, dict):
-        return fallback
-
-    summary = parsed.get("summary") or fallback.summary
-    trend_narrative = coerce_string_list(parsed.get("trend_narrative"), fallback.trend_narrative)
-    anomaly_commentary = coerce_string_list(parsed.get("anomaly_commentary"), fallback.anomaly_commentary)
-    recommended_actions = coerce_string_list(parsed.get("recommended_actions"), fallback.recommended_actions)
-
-    return NarrativeSections(
-        summary=str(summary),
-        trend_narrative=trend_narrative,
-        anomaly_commentary=anomaly_commentary,
-        recommended_actions=recommended_actions,
-    )
-
-
-def coerce_string_list(value: Any, fallback: list[str]) -> list[str]:
-    """Normalize a model field into a list of strings."""
-    if not isinstance(value, list):
-        return fallback
-    normalized = [str(item).strip() for item in value if str(item).strip()]
-    return normalized or fallback
 
 
 def extract_openai_output_text(response: Any) -> str:

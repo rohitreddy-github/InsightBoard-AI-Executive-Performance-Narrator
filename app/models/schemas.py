@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, StringConstraints
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, FiniteFloat, StringConstraints
 from typing_extensions import Annotated
 
 
@@ -102,6 +102,34 @@ class NarrativeSections(BaseModel):
     trend_narrative: list[str] = Field(default_factory=list)
     anomaly_commentary: list[str] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
+
+
+class LLMNarrativeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    executive_summary: str = Field(
+        validation_alias=AliasChoices("executive_summary", "summary"),
+    )
+    trend_analysis: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("trend_analysis", "trend_narrative"),
+    )
+    anomaly_explanation: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("anomaly_explanation", "anomaly_commentary"),
+    )
+    action_items: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("action_items", "recommended_actions"),
+    )
+
+    def to_narrative_sections(self) -> NarrativeSections:
+        return NarrativeSections(
+            summary=self.executive_summary,
+            trend_narrative=self.trend_analysis,
+            anomaly_commentary=self.anomaly_explanation,
+            recommended_actions=self.action_items,
+        )
 
 
 class ReportResponse(BaseModel):
