@@ -1,10 +1,13 @@
 from app.models.schemas import AnomalyInsight, ChartExplanation, MetricSnapshot, NarrativeSections
-from app.services.llm import LLMClient
+from app.services.llm import LLMClient, StructuredPrompt
+from app.services.prompt_engineering import PromptAssembler
+from app.prompts.system_prompts import PersonaRole
 
 
 class NarrativeGenerator:
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(self, llm_client: LLMClient, default_persona: PersonaRole = PersonaRole.CFO) -> None:
         self.llm_client = llm_client
+        self.default_persona = default_persona
 
     def generate(
         self,
@@ -12,12 +15,41 @@ class NarrativeGenerator:
         metric_snapshots: list[MetricSnapshot],
         anomalies: list[AnomalyInsight],
         chart_explanation: ChartExplanation,
+        persona: PersonaRole | None = None,
+        chart_base64: str | None = None,
+        records_analyzed: int | None = None,
+        periods_analyzed: int | None = None,
+        date_range_start: str = "Unknown",
+        date_range_end: str = "Unknown",
     ) -> NarrativeSections:
+        """
+        Generate narrative sections with optional persona-specific prompt engineering.
+
+        Args:
+            report_title: Title of the report
+            metric_snapshots: List of KPI snapshots
+            anomalies: List of detected anomalies
+            chart_explanation: Chart explanation metadata
+            persona: Optional persona for prompt personalization (defaults to CFO)
+            chart_base64: Optional base64-encoded chart image
+            records_analyzed: Count of source rows analyzed
+            periods_analyzed: Count of time buckets analyzed
+            date_range_start: Start date of analyzed period
+            date_range_end: End date of analyzed period
+
+        Returns:
+            NarrativeSections with generated narrative
+        """
+        persona = persona or self.default_persona
+        resolved_records = records_analyzed or len(metric_snapshots)
+        resolved_periods = periods_analyzed or len(metric_snapshots)
+
+        # Build fallback narrative (always available)
         up_trends = [snapshot.metric for snapshot in metric_snapshots if snapshot.trend_direction == "up"]
         down_trends = [snapshot.metric for snapshot in metric_snapshots if snapshot.trend_direction == "down"]
 
         summary_parts = [
-            f"{report_title} covers {len(metric_snapshots)} KPI(s).",
+            f"{report_title} covers {resolved_periods} reporting period(s) across {len(metric_snapshots)} KPI(s).",
             self._build_summary_line(up_trends, down_trends),
             f"{len(anomalies)} anomaly signal(s) require attention.",
         ]
@@ -34,12 +66,47 @@ class NarrativeGenerator:
             recommended_actions=recommended_actions,
         )
 
+        # Build context dict with prompt engineering
         context = {
             "metric_snapshots": [snapshot.model_dump() for snapshot in metric_snapshots],
             "anomalies": [anomaly.model_dump() for anomaly in anomalies],
             "chart_explanation": chart_explanation.model_dump(),
+            "report_metadata": {
+                "report_title": report_title,
+                "records_analyzed": resolved_records,
+                "periods_analyzed": resolved_periods,
+                "date_range_start": date_range_start,
+                "date_range_end": date_range_end,
+                "persona": persona.value,
+            },
         }
-        return self.llm_client.generate_sections(report_title, context, fallback)
+
+        # Phase 5: Assemble structured prompts
+        assembler = PromptAssembler(persona=persona)
+        assembly = assembler.assemble(
+            anomalies=anomalies,
+            metric_snapshots=metric_snapshots,
+            report_title=report_title,
+            records_analyzed=resolved_records,
+            periods_analyzed=resolved_periods,
+            chart_base64=chart_base64,
+            chart_explanation=chart_explanation,
+            date_range_start=date_range_start,
+            date_range_end=date_range_end,
+        )
+        context["prompt_context"] = assembly.context_sections
+
+        # Call LLM with structured prompt
+        return self.llm_client.generate_sections(
+            report_title=report_title,
+            context=context,
+            fallback=fallback,
+            prompt=StructuredPrompt(
+                system_prompt=assembly.system_prompt,
+                user_prompt=assembly.user_prompt,
+            ),
+            system_prompt=assembly.system_prompt,
+        )
 
     @staticmethod
     def _build_summary_line(up_trends: list[str], down_trends: list[str]) -> str:
