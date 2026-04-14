@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InsightBoard Executive Narrator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">InsightBoard AI</p>
+        <h1>Executive KPI Narratives from a Single CSV Upload</h1>
+        <p class="hero-text">
+          Upload structured KPI data, generate a board-ready narrative, inspect anomaly commentary,
+          and review the chart payload returned by the FastAPI backend.
+        </p>
+      </div>
+      <div class="hero-card">
+        <div class="hero-stat">
+          <span class="hero-stat-label">Endpoint</span>
+          <span class="hero-stat-value mono">POST /api/v1/generate-report</span>
+        </div>
+        <div class="hero-stat">
+          <span class="hero-stat-label">Input</span>
+          <span class="hero-stat-value">CSV upload + optional chart</span>
+        </div>
+        <div class="hero-stat">
+          <span class="hero-stat-label">Output</span>
+          <span class="hero-stat-value">Narrative JSON + Base64 chart</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel form-panel">
+        <div class="panel-header">
+          <h2>Generate Report</h2>
+          <p>Submit a KPI CSV and let the backend produce a structured executive report.</p>
+        </div>
+
+        <form id="report-form" class="report-form" novalidate>
+          <label class="field">
+            <span>Report title</span>
+            <input type="text" id="report-title" name="report_title" placeholder="Board KPI Summary">
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Persona</span>
+              <select id="persona" name="persona">
+                <option value="cfo">Chief Financial Officer</option>
+                <option value="coo">Chief Operating Officer</option>
+                <option value="cro">Chief Revenue Officer</option>
+                <option value="analyst">Business Analyst</option>
+                <option value="operations">Operations Lead</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Aggregation</span>
+              <select id="aggregation" name="aggregation_granularity">
+                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Missing values</span>
+              <select id="missing-strategy" name="missing_value_strategy">
+                <option value="forward_fill">Forward fill</option>
+                <option value="interpolate">Interpolate</option>
+                <option value="drop">Drop</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="upload-grid">
+            <label class="upload-card">
+              <span class="upload-title">KPI CSV</span>
+              <span class="upload-subtitle">Required. Format: <span class="mono">date,metric_name,value</span></span>
+              <input type="file" id="csv-file" name="csv_file" accept=".csv,text/csv" required>
+            </label>
+
+            <label class="upload-card">
+              <span class="upload-title">Chart Image</span>
+              <span class="upload-subtitle">Optional. PNG or JPEG for multimodal review.</span>
+              <input type="file" id="chart-image" name="chart_image" accept="image/png,image/jpeg,image/jpg,image/webp">
+            </label>
+          </div>
+
+          <div id="validation-message" class="message hidden" role="alert"></div>
+
+          <div class="form-actions">
+            <button type="submit" id="submit-button" class="primary-button">Generate Executive Report</button>
+            <div id="loading-indicator" class="loading hidden" aria-live="polite">
+              <span class="spinner" aria-hidden="true"></span>
+              <span>Processing KPI data and building narrative...</span>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section id="error-panel" class="panel status-panel hidden" role="alert">
+        <div class="panel-header">
+          <h2>Request Error</h2>
+        </div>
+        <p id="error-message"></p>
+      </section>
+
+      <section id="results-panel" class="results-grid hidden">
+        <article class="panel panel-span-2 narrative-panel">
+          <div class="panel-header">
+            <h2 id="result-title">Executive Report</h2>
+            <p id="result-meta"></p>
+          </div>
+          <p id="executive-summary" class="executive-summary"></p>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Recommended Actions</h2>
+          </div>
+          <ul id="recommended-actions" class="insight-list"></ul>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Anomaly Commentary</h2>
+          </div>
+          <ul id="anomaly-commentary" class="insight-list"></ul>
+        </article>
+
+        <article class="panel panel-span-2">
+          <div class="panel-header">
+            <h2>Trend Narrative</h2>
+          </div>
+          <ul id="trend-narrative" class="insight-list"></ul>
+        </article>
+
+        <article class="panel panel-span-2 chart-panel">
+          <div class="panel-header">
+            <h2>Chart Preview</h2>
+            <p id="chart-meta"></p>
+          </div>
+          <div class="chart-frame">
+            <img id="chart-image-preview" alt="Generated KPI chart" class="hidden">
+            <div id="chart-empty-state" class="chart-empty-state">No chart payload was returned.</div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Processing Summary</h2>
+          </div>
+          <dl id="processing-summary" class="summary-grid"></dl>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Metric Snapshots</h2>
+          </div>
+          <div id="metric-snapshots" class="metric-cards"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
